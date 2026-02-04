@@ -4,6 +4,11 @@ This is probably one of the projects I have cared about the most. It fuses my co
 
 The gui is purposely bad, however currently not the 'bad' im looking for. My plan is to make it look more like the clasic Tkinter GUI, because for some reason i like it.
 
+### Prerequisites
+- Python 3.9 or higher
+- Webcam
+- (Optional) CUDA-capable GPU for acceleration
+
 ## What it does
 - Captures webcam frames and trains a model on the fly with user-labeled targets.
 - Chains a NumPy/CuPy-style CNN front-end to a hand-built MLP classifier.
@@ -19,8 +24,29 @@ The gui is purposely bad, however currently not the 'bad' im looking for. My pla
 2. Choose **Create New**, dial in the conv/MLP settings, and submit.
 3. click **Submit**, aim the webcam, select the class label, and toggle live training.
 
+### GPU Acceleration (Optional)
+
+To use CuPy for GPU acceleration:
+
+```bash
+# For CUDA 12.x
+pip install cupy-cuda12x
+
+# Then edit ConvolutionalNeuralNetwork_numpy.py:
+# Change: import numpy as cp
+# To:     import cupy as cp
+```
+
+## Dependencies
+
+- **PySide6**: GUI framework
+- **OpenCV**: Webcam capture and image processing
+- **NumPy**: Numerical computing for neural networks
+- **CuPy** (optional): GPU-accelerated computing
+
 ## Next up
 - Finish the save/load path so experiments aren’t strictly in-memory.
 - Add better telemetry (loss plots, per-class confidence readouts) to understand what the live loop is learning.
 
 - Explore lightweight data augmentation for more stable real-time training.
+

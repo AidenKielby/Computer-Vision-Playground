@@ -1,6 +1,8 @@
 # Computer-Vision-Playground
 
-This is still one of the projects I cared about the most. It fuses my convolutional network from the (currently shelved) diffusion-model experiments with the multilayer perceptron from my earlier neural-network work, creating a playground for building simple computer-vision ideas.
+This is probably one of the projects I have cared about the most. It fuses my convolutional network from the (currently shelved) diffusion-model experiments with the multilayer perceptron from my earlier neural-network work, creating a playground for building simple computer-vision ideas.
+
+The gui is purposely bad, however currently not the 'bad' im looking for. My plan is to make it look more like the clasic Tkinter GUI, because for some reason i like it.
 
 ## What it does
 - Captures webcam frames and trains a model on the fly with user-labeled targets.
@@ -20,4 +22,5 @@ This is still one of the projects I cared about the most. It fuses my convolutio
 ## Next up
 - Finish the save/load path so experiments aren’t strictly in-memory.
 - Add better telemetry (loss plots, per-class confidence readouts) to understand what the live loop is learning.
+
 - Explore lightweight data augmentation for more stable real-time training.

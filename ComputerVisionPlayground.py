@@ -149,7 +149,16 @@ class TrainScreen(QWidget):
         self.error_label = QLabel("Loss: -")
         layout.addWidget(self.error_label)
 
-        self.learning_rate = 1e-3
+        self.last_output = QLabel("Last Output: -")
+        layout.addWidget(self.last_output)
+
+        self.learning_rate_in = QSpinBox()
+        self.learning_rate_in.setMinimum(0)
+        self.learning_rate_in.setMaximum(10000)
+        layout.addWidget(QLabel("Learning Rate (/10000):"))
+        layout.addWidget(self.learning_rate_in)
+
+        self.learning_rate = self.learning_rate_in.value()
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(0)
@@ -173,14 +182,16 @@ class TrainScreen(QWidget):
 
         if self.training:
             global cvm
+            self.learning_rate = self.learning_rate_in.value()
             if cvm is not None:
                 tensor = self.frame_to_tensor(frame_rgb, cvm.inputSize[0])
-                cvm.forwardPass(tensor)
+                output = cvm.forwardPass(tensor)
                 expected = [1.0 if i + 1 == self.outp_spin_box.value() else 0.0 for i in range(cvm.outputs)]
-                loss = cvm.backpropigate(expected, self.learning_rate)
+                loss = cvm.backpropigate(expected, self.learning_rate/10000)
                 if loss is not None:
                     self.last_loss = loss
                     self.error_label.setText(f"Loss: {loss:.4f}")
+                    self.last_output.setText(f"Last Output: {output}")
 
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w

@@ -45,8 +45,10 @@ pip install cupy-cuda12x
 - **CuPy** (optional): GPU-accelerated computing
 
 ## Next up
+- Change the trining to sample videos based on the users input, and train X epochs on those videos. Move live loop trining to loading.
 - Finish the save/load path so experiments aren’t strictly in-memory.
 - Add better telemetry (loss plots, per-class confidence readouts) to understand what the live loop is learning.
 
 - Explore lightweight data augmentation for more stable real-time training.
+
 

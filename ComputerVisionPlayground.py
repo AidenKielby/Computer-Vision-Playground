@@ -10,15 +10,16 @@ from CVModel import CVModel
 
 cvm = None
 train_screen = None
+t_screen = None
+u_screen = None
 
 class HomeScreen(QWidget):
     def __init__(self, stack):
         super().__init__()
         self.stack = stack
         layout = QVBoxLayout()
-        layout.addWidget(QPushButton("Load And Use", clicked=self.go_to_screen1))
+        layout.addWidget(QPushButton("Load", clicked=self.go_to_screen1))
         layout.addWidget(QPushButton("Create New", clicked=self.go_to_screen2))
-        layout.addWidget(QPushButton("Load And Train", clicked=self.go_to_screen3))
         self.setLayout(layout)
 
     def go_to_screen1(self):
@@ -26,18 +27,56 @@ class HomeScreen(QWidget):
     
     def go_to_screen2(self):
         self.stack.setCurrentIndex(2) 
-    
-    def go_to_screen3(self):
-        self.stack.setCurrentIndex(3) 
 
-class LoadAndUseScreen(QWidget):
+class Placeholder(QWidget):
     def __init__(self, stack):
         super().__init__()
         self.stack = stack
-        self.setWindowTitle("Load And Use CV Model")
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+class Load(QWidget):
+    def __init__(self, stack):
+        super().__init__()
+        self.stack = stack
+        self.setWindowTitle("Load CV Model")
         layout = QVBoxLayout()
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         self.setLayout(layout)
+
+        self.line_edit = QLineEdit()
+        self.line_edit.setPlaceholderText("Model To Load (no .pkl)")
+        layout.addWidget(self.line_edit)
+
+        button = QPushButton("Load And Train")
+        button.clicked.connect(self.load_train)
+        layout.addWidget(button)
+
+        button1 = QPushButton("Load And Use")
+        button1.clicked.connect(self.load_use)
+        layout.addWidget(button1)
+
+    def load_train(self):
+        global cvm
+        try:
+            with open(f"{self.line_edit.text()}.pkl", "rb") as f:
+                cvm = pickle.load(f)
+            if t_screen is not None:
+                t_screen.refresh_model()
+            self.stack.setCurrentIndex(4) 
+        except(FileNotFoundError):
+            print("file not found")
+
+    def load_use(self):
+        global cvm
+        try:
+            with open(f"{self.line_edit.text()}.pkl", "rb") as f:
+                cvm = pickle.load(f)
+            if u_screen is not None:
+                u_screen.refresh_model()
+            self.stack.setCurrentIndex(3) 
+        except(FileNotFoundError):
+            print("file not found")
 
     def go_to_screen1(self):
         self.stack.setCurrentIndex(0) 
@@ -101,20 +140,6 @@ class CreateNewScreen(QWidget):
         if train_screen is not None:
             train_screen.refresh_model()
         self.stack.setCurrentIndex(5)
-
-    def go_to_screen1(self):
-        self.stack.setCurrentIndex(0)
-
-#inputSize, outputSize, kernelSize, poolerSize, layers, kernelsPerLayer, inputChannels=1
-
-class LoadAndTrainScreen(QWidget):
-    def __init__(self, stack):
-        super().__init__()
-        self.stack = stack
-        self.setWindowTitle("Load And Train CV Model")
-        layout = QVBoxLayout()
-        layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
-        self.setLayout(layout)
 
     def go_to_screen1(self):
         self.stack.setCurrentIndex(0)
@@ -245,6 +270,113 @@ class TrainScreen(QWidget):
         self.training_label.setText("Training: OFF")
         self.error_label.setText("Loss: -")
         self.training = False
+
+    def closeEvent(self, event):
+        if self.timer.isActive():
+            self.timer.stop()
+        if self.cap.isOpened():
+            self.cap.release()
+        super().closeEvent(event)
+
+class UseScreen(QWidget):
+    def __init__(self, stack):
+        global cvm
+        self.using = False
+        self.last_loss = None
+        super().__init__()
+        self.stack = stack
+        self.setWindowTitle("Use Model")
+        layout = QVBoxLayout()
+        layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
+        layout.addWidget(QPushButton("Start/Stop", clicked=self.use))
+        self.setLayout(layout)
+
+        self.camera_label = QLabel()
+        self.camera_label.setFixedSize(640, 480)
+        layout.addWidget(self.camera_label)
+
+        self.using_label = QLabel("Using: OFF")
+        layout.addWidget(self.using_label)
+
+        self.last_output = QLabel("Last Output: -")
+        layout.addWidget(self.last_output)
+
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(0)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        if self.cap.isOpened():
+            self.timer.start(30)
+        else:
+            self.camera_label.setText("Unable to open camera")
+
+    def update_frame(self):
+        if not self.cap.isOpened():
+            return
+
+        ret, frame_bgr = self.cap.read()
+        if not ret:
+            self.camera_label.setText("Failed to read frame")
+            return
+
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+        if self.using:
+            global cvm
+            if cvm is not None:
+                tensor = self.frame_to_tensor(frame_rgb, cvm.inputSize[0])
+                output = cvm.forwardPass(tensor)
+                if output is not None:
+                    self.last_output.setText(f"Last Output: {output}")
+
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+
+        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimg)
+
+        scaled_pixmap = pixmap.scaled(
+            self.camera_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        self.camera_label.setPixmap(scaled_pixmap)
+        self.camera_label.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding
+        )
+    
+    def use(self):
+        global cvm
+        if cvm is None:
+            self.using = False
+            self.using_label.setText("Using: OFF (no model)")
+            return
+
+        self.using = not self.using
+        status = "ON" if self.using else "OFF"
+        self.using_label.setText(f"Using: {status}")
+
+    def go_to_screen1(self):
+        self.stack.setCurrentIndex(0)
+    
+
+    def frame_to_tensor(self, frame_rgb, size: int):
+        size = max(1, size)
+        resized = cv2.resize(frame_rgb, (size, size), interpolation=cv2.INTER_AREA)
+        normalized = resized.astype(np.float32) / 255.0
+        chw = np.transpose(normalized, (2, 0, 1))
+        return chw
+
+    def refresh_model(self):
+        global cvm
+        if cvm is None:
+            return
+
+        self.using_label.setText("Using: OFF")
+        self.using = False
 
     def closeEvent(self, event):
         if self.timer.isActive():
@@ -540,13 +672,15 @@ app = QApplication(sys.argv)
 stack = QStackedWidget()
 
 screen1 = HomeScreen(stack)
-screen2 = LoadAndUseScreen(stack)
+screen2 = Load(stack)
 screen3 = CreateNewScreen(stack)
-screen4 = LoadAndTrainScreen(stack)
+screen4 = UseScreen(stack)
 screen5 = TrainScreen(stack)
 screen6 = MakeTrainingInfoScreen(stack)
 screen7 = TrainFromVideos(stack)
 train_screen = screen6
+t_screen = screen5
+u_screen = screen4
 
 stack.addWidget(screen1)
 stack.addWidget(screen2)

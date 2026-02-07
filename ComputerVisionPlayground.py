@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import os
 import pickle
+import time
 from CVModel import CVModel
 
 
@@ -590,6 +591,9 @@ class TrainFromVideos(QWidget):
         self.error = QLabel("Error: -")
         layout.addWidget(self.error)
 
+        self.eta_label = QLabel("Estimated time remaining: --")
+        layout.addWidget(self.eta_label)
+
         layout.addWidget(self.progress)
 
         self.continue_btn = QPushButton("Continue", clicked=self.save_and_done)
@@ -627,8 +631,13 @@ class TrainFromVideos(QWidget):
             epochs=self.epochs
         )
 
+        self.progress.setValue(0)
+        self.continue_btn.setEnabled(False)
+        self.update_eta(-1)
+
         self.worker.progress.connect(self.progress.setValue)
         self.worker.error.connect(lambda val: self.error.setText(f"Error: {val:.4f}"))
+        self.worker.eta.connect(self.update_eta)
         self.worker.finished.connect(self.training_done)
 
         self.worker.start()
@@ -645,11 +654,30 @@ class TrainFromVideos(QWidget):
     def training_done(self):
         self.progress.setValue(100)
         self.continue_btn.setEnabled(True)
+        self.update_eta(0)
+
+    def update_eta(self, seconds):
+        if seconds is None or seconds < 0:
+            text = "--"
+        else:
+            total_seconds = max(0, int(round(seconds)))
+            if total_seconds >= 3600:
+                hours, rem = divmod(total_seconds, 3600)
+                minutes, secs = divmod(rem, 60)
+                text = f"{hours}h {minutes}m {secs}s"
+            elif total_seconds >= 60:
+                minutes, secs = divmod(total_seconds, 60)
+                text = f"{minutes}m {secs}s"
+            else:
+                text = f"{total_seconds}s"
+
+        self.eta_label.setText(f"Estimated time remaining: {text}")
 
 class VideoTrainingWorker(QThread):
     progress = Signal(int)
     finished = Signal()
     error = Signal(float)
+    eta = Signal(float)
 
     def __init__(self, video_paths, cvm, learning_rate, epochs):
         super().__init__()
@@ -663,14 +691,35 @@ class VideoTrainingWorker(QThread):
         self._running = False
 
     def run(self):
-        for i in range(self.epochs):
-            total_frames = 0
-            for path in self.video_paths:
-                cap = cv2.VideoCapture(path)
-                total_frames += int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                cap.release()
+        if not self.video_paths or self.epochs <= 0:
+            self.progress.emit(100)
+            self.eta.emit(0.0)
+            self.finished.emit()
+            return
 
-            processed = 0
+        frame_counts = []
+        for path in self.video_paths:
+            cap = cv2.VideoCapture(path)
+            if cap.isOpened():
+                frame_counts.append(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+            else:
+                frame_counts.append(0)
+            cap.release()
+
+        total_frames_per_epoch = sum(frame_counts)
+        if total_frames_per_epoch <= 0:
+            self.progress.emit(100)
+            self.eta.emit(0.0)
+            self.finished.emit()
+            return
+
+        total_work = total_frames_per_epoch * self.epochs
+        processed_global = 0
+        start_time = time.time()
+
+        for _ in range(self.epochs):
+            if not self._running:
+                break
 
             for path in self.video_paths:
                 if not self._running:
@@ -692,14 +741,27 @@ class VideoTrainingWorker(QThread):
                     expected = self.get_expected_output(path)
 
                     lastE = self.cvm.backpropigate(expected, self.learning_rate)
-                    
                     self.error.emit(lastE)
 
-                    processed += 1
-                    percent = int((processed / (total_frames*self.epochs)) * 100)
-                    self.progress.emit(percent)
+                    processed_global += 1
+                    fraction = processed_global / total_work
+                    percent = int(fraction * 100)
+                    self.progress.emit(min(100, percent))
+
+                    if processed_global > 0:
+                        elapsed = max(1e-6, time.time() - start_time)
+                        rate = elapsed / processed_global
+                        remaining = max(0, total_work - processed_global)
+                        eta_seconds = rate * remaining
+                        self.eta.emit(eta_seconds)
 
                 cap.release()
+
+        if processed_global >= total_work:
+            self.progress.emit(100)
+            self.eta.emit(0.0)
+        else:
+            self.eta.emit(-1.0)
 
         self.finished.emit()
 

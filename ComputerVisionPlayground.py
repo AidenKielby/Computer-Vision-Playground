@@ -4,6 +4,7 @@ from PySide6.QtGui import QImage, QPixmap
 import cv2
 import sys
 import numpy as np
+import os
 from CVModel import CVModel
 
 cvm = None
@@ -98,7 +99,7 @@ class CreateNewScreen(QWidget):
         cvm = CVModel([self.layer_spin_box.value(), self.layer_spin_box.value()], self.outp_spin_box.value(), self.layer_spin_box.value(), self.kpl_spin_box.value(), 3, self.kernel_spin_box.value())
         if train_screen is not None:
             train_screen.refresh_model()
-        self.stack.setCurrentIndex(4)
+        self.stack.setCurrentIndex(5)
 
     def go_to_screen1(self):
         self.stack.setCurrentIndex(0)
@@ -251,6 +252,145 @@ class TrainScreen(QWidget):
             self.cap.release()
         super().closeEvent(event)
 
+class MakeTrainingInfoScreen(QWidget):
+    def __init__(self, stack):
+        global cvm
+        self.training = False
+        self.last_loss = None
+        self.video_writer = None
+        self.record_fps = 30
+        self.record_size = None
+        super().__init__()
+        self.stack = stack
+        self.setWindowTitle("Train Model")
+        layout = QVBoxLayout()
+        layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
+        layout.addWidget(QPushButton("Start/Stop Training", clicked=self.train))
+        self.setLayout(layout)
+
+        self.camera_label = QLabel()
+        self.camera_label.setFixedSize(640, 480)
+        layout.addWidget(self.camera_label)
+
+        xy_layout = QGridLayout()
+        self.outp_spin_box = QSpinBox()
+        self.outp_spin_box.setMinimum(1)
+        self.outp_spin_box.setMaximum(cvm.outputs if cvm!=None else 1)
+        xy_layout.addWidget(QLabel("Correct Output:"))
+        xy_layout.addWidget(self.outp_spin_box)
+
+        layout.addLayout(xy_layout)
+
+        self.training_label = QLabel("Collecting Data: OFF")
+        layout.addWidget(self.training_label)
+
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(0)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        if self.cap.isOpened():
+            self.timer.start(30)
+        else:
+            self.camera_label.setText("Unable to open camera")
+
+    def update_frame(self):
+        if not self.cap.isOpened():
+            return
+
+        ret, frame_bgr = self.cap.read()
+        if not ret:
+            self.camera_label.setText("Failed to read frame")
+            return
+
+        if self.record_size is None:
+            h, w, _ = frame_bgr.shape
+            self.record_size = (w, h)
+
+        if self.training and self.video_writer is not None:
+            self.video_writer.write(frame_bgr)
+        
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimg)
+        scaled_pixmap = pixmap.scaled(
+            self.camera_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        self.camera_label.setPixmap(scaled_pixmap)
+    
+    def train(self):
+        if self.record_size is None:
+            self.training = False
+            self.training_label.setText("Collecting Data: OFF (no camera frame yet)")
+            return
+        global cvm
+        if cvm is None:
+            self.training = False
+            self.training_label.setText("Collecting Data: OFF (no model)")
+            return
+
+        self.training = not self.training
+
+        if self.training:
+            # start
+            out_idx = self.outp_spin_box.value()
+            os.makedirs("saved_videos", exist_ok=True)
+            filename = f"saved_videos/correct_in_{out_idx}.mov"
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # works for .mov and .mp4
+            self.video_writer = cv2.VideoWriter(
+                filename,
+                fourcc,
+                self.record_fps,
+                self.record_size
+            )
+
+            self.training_label.setText("Collecting Data: ON")
+        else:
+            # stop recording 
+            if self.video_writer is not None:
+                self.video_writer.release()
+                self.video_writer = None
+
+            self.training_label.setText("Collecting Data: OFF")
+    def go_to_screen1(self):
+        self.stack.setCurrentIndex(0)
+    
+
+    def frame_to_tensor(self, frame_rgb, size: int):
+        size = max(1, size)
+        resized = cv2.resize(frame_rgb, (size, size), interpolation=cv2.INTER_AREA)
+        normalized = resized.astype(np.float32) / 255.0
+        chw = np.transpose(normalized, (2, 0, 1))
+        return chw
+
+    def refresh_model(self):
+        global cvm
+        if cvm is None:
+            return
+
+        self.outp_spin_box.setMaximum(max(1, cvm.outputs))
+        self.outp_spin_box.setValue(1)
+        self.training_label.setText("Collecting Data: OFF")
+        self.training = False
+
+    def closeEvent(self, event):
+        if self.timer.isActive():
+            self.timer.stop()
+
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
+
+        if self.cap.isOpened():
+            self.cap.release()
+
+        super().closeEvent(event)
+
 app = QApplication(sys.argv)
 stack = QStackedWidget()
 
@@ -259,13 +399,15 @@ screen2 = LoadAndUseScreen(stack)
 screen3 = CreateNewScreen(stack)
 screen4 = LoadAndTrainScreen(stack)
 screen5 = TrainScreen(stack)
-train_screen = screen5
+screen6 = MakeTrainingInfoScreen(stack)
+train_screen = screen6
 
 stack.addWidget(screen1)
 stack.addWidget(screen2)
 stack.addWidget(screen3) 
 stack.addWidget(screen4) 
-stack.addWidget(screen5) 
+stack.addWidget(screen5)
+stack.addWidget(screen6)  
 
   # Start with Screen 1
 stack.setCurrentIndex(0)

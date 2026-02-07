@@ -1,4 +1,22 @@
-import cupy as cp
+try:
+    import cupy as cp
+    _cupy_available = True
+except ImportError:  # pragma: no cover - CPU fallback
+    import numpy as cp  # type: ignore
+    _cupy_available = False
+import numpy as np
+
+
+def _to_numpy(arr):
+    if _cupy_available:
+        return cp.asnumpy(arr)
+    if hasattr(arr, "get"):
+        return arr.get()
+    return np.asarray(arr)
+
+
+def _to_backend(arr):
+    return cp.asarray(arr, dtype=cp.float32)
 
 class CNNVectorized:
 
@@ -183,6 +201,38 @@ class CNNVectorized:
 
             self.kernelLayers[layerIndex] -= learningRate * kernelGradients
             self.biases[layerIndex] -= learningRate * biasGradients
+
+    def __getstate__(self):
+        return {
+            "inputSize": self.inputSize,
+            "outputSize": self.outputSize,
+            "kernelSize": self.kernelSize,
+            "poolerSize": self.poolerSize,
+            "numLayers": self.numLayers,
+            "kernelsPerLayer": self.kernelsPerLayer,
+            "inputChannels": self.inputChannels,
+            "kernelLayers": [_to_numpy(k) for k in self.kernelLayers],
+            "biases": [_to_numpy(b) for b in self.biases],
+            "grad_clip": self.grad_clip,
+        }
+
+    def __setstate__(self, state):
+        self.inputSize = tuple(state["inputSize"])
+        self.outputSize = tuple(state["outputSize"])
+        self.kernelSize = state["kernelSize"]
+        self.poolerSize = state["poolerSize"]
+        self.numLayers = state["numLayers"]
+        self.kernelsPerLayer = state["kernelsPerLayer"]
+        self.inputChannels = state["inputChannels"]
+        self.grad_clip = state.get("grad_clip", 5.0)
+
+        self.inputs = None
+        self.layers = []
+        self.preActivation = []
+
+        self.kernelLayers = [_to_backend(k) for k in state["kernelLayers"]]
+        self.biases = [_to_backend(b) for b in state["biases"]]
+        self.distanceFromKernelCenter = self.kernelSize // 2
 
 def train_on_symbols_vec(iterations=1000, lr=0.01):
     x_img = cp.array([

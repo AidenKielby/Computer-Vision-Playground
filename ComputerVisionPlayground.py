@@ -1,10 +1,11 @@
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy, QProgressBar
+from PySide6.QtCore import QTimer, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 import cv2
 import sys
 import numpy as np
 import os
+import pickle
 from CVModel import CVModel
 
 cvm = None
@@ -265,7 +266,8 @@ class MakeTrainingInfoScreen(QWidget):
         self.setWindowTitle("Train Model")
         layout = QVBoxLayout()
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
-        layout.addWidget(QPushButton("Start/Stop Training", clicked=self.train))
+        layout.addWidget(QPushButton("Start/Stop Collecting", clicked=self.train))
+        layout.addWidget(QPushButton("Finished Collecting", clicked=self.done))
         self.setLayout(layout)
 
         self.camera_label = QLabel()
@@ -378,6 +380,9 @@ class MakeTrainingInfoScreen(QWidget):
         self.training_label.setText("Collecting Data: OFF")
         self.training = False
 
+    def done(self):
+        self.stack.setCurrentIndex(6)
+
     def closeEvent(self, event):
         if self.timer.isActive():
             self.timer.stop()
@@ -391,6 +396,146 @@ class MakeTrainingInfoScreen(QWidget):
 
         super().closeEvent(event)
 
+class TrainFromVideos(QWidget):
+    def __init__(self, stack):
+        super().__init__()
+        self.stack = stack
+        self.setWindowTitle("Train From Videos")
+        layout = QVBoxLayout()
+        layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
+
+        self.progress = QProgressBar()
+        self.progress.setMinimum(0)
+        self.progress.setMaximum(100)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(True)
+        self.progress.setAlignment(Qt.AlignCenter)
+
+        self.error = QLabel("Error: -")
+        layout.addWidget(self.error)
+
+        layout.addWidget(self.progress)
+
+        self.continue_btn = QPushButton("Continue", clicked=self.save_and_done)
+        self.continue_btn.setEnabled(False)
+        layout.addWidget(self.continue_btn)
+
+        self.setLayout(layout)
+
+        self.epochs = 20
+        self.learningRate = 0.001
+
+    def go_to_screen1(self):
+        self.stack.setCurrentIndex(0)
+
+    def save_and_done(self):
+        global cvm
+        with open("vision_model.pkl", "wb") as f:
+            pickle.dump(cvm, f)
+
+        self.go_to_screen1()
+
+    def start_training(self):
+        global cvm
+        if cvm == None:
+            return
+
+        video_paths = [
+            f"saved_videos/correct_in_{i+1}.mov" for i in range(cvm.outputs)
+        ]
+
+        self.worker = VideoTrainingWorker(
+            video_paths=video_paths,
+            cvm=cvm,
+            learning_rate=self.learningRate,
+            epochs=self.epochs
+        )
+
+        self.worker.progress.connect(self.progress.setValue)
+        self.worker.error.connect(lambda val: self.error.setText(f"Error: {val:.4f}"))
+        self.worker.finished.connect(self.training_done)
+
+        self.worker.start()
+
+    def stop_training(self):
+        if self.worker:
+            self.worker.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if cvm is not None:
+            self.start_training()
+
+    def training_done(self):
+        self.progress.setValue(100)
+        self.continue_btn.setEnabled(True)
+
+class VideoTrainingWorker(QThread):
+    progress = Signal(int)
+    finished = Signal()
+    error = Signal(float)
+
+    def __init__(self, video_paths, cvm, learning_rate, epochs):
+        super().__init__()
+        self.video_paths = video_paths
+        self.cvm = cvm
+        self.learning_rate = learning_rate
+        self._running = True
+        self.epochs = epochs
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        for i in range(self.epochs):
+            total_frames = 0
+            for path in self.video_paths:
+                cap = cv2.VideoCapture(path)
+                total_frames += int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+
+            processed = 0
+
+            for path in self.video_paths:
+                if not self._running:
+                    break
+
+                cap = cv2.VideoCapture(path)
+                while cap.isOpened():
+                    if not self._running:
+                        break
+
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    tensor = self.frame_to_tensor(frame_rgb, self.cvm.inputSize[0])
+
+                    output = self.cvm.forwardPass(tensor)
+                    expected = self.get_expected_output(path)
+
+                    lastE = self.cvm.backpropigate(expected, self.learning_rate)
+                    
+                    self.error.emit(lastE)
+
+                    processed += 1
+                    percent = int((processed / (total_frames*self.epochs)) * 100)
+                    self.progress.emit(percent)
+
+                cap.release()
+
+        self.finished.emit()
+
+    def frame_to_tensor(self, frame_rgb, size):
+        frame = cv2.resize(frame_rgb, (size, size))
+        frame = frame.astype("float32") / 255.0
+        return frame.transpose(2, 0, 1)
+
+    def get_expected_output(self, path):
+        idx = int(os.path.basename(path).split("_")[-1].split(".")[0])
+        return [1.0 if i + 1 == idx else 0.0 for i in range(self.cvm.outputs)]
+
 app = QApplication(sys.argv)
 stack = QStackedWidget()
 
@@ -400,6 +545,7 @@ screen3 = CreateNewScreen(stack)
 screen4 = LoadAndTrainScreen(stack)
 screen5 = TrainScreen(stack)
 screen6 = MakeTrainingInfoScreen(stack)
+screen7 = TrainFromVideos(stack)
 train_screen = screen6
 
 stack.addWidget(screen1)
@@ -408,6 +554,7 @@ stack.addWidget(screen3)
 stack.addWidget(screen4) 
 stack.addWidget(screen5)
 stack.addWidget(screen6)  
+stack.addWidget(screen7)
 
   # Start with Screen 1
 stack.setCurrentIndex(0)

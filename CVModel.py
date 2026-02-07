@@ -2,6 +2,11 @@ from Network import NeuralNetwork
 from ConvolutionalNeuralNetwork_numpy import CNNVectorized
 import numpy as np
 
+try:
+    import cupy as cp  # keep CNN gradients on the same backend
+except ImportError:  # pragma: no cover - CPU fallback
+    cp = np
+
 class CVModel:
     def __init__(self, inputSize: tuple[int], outputs: int, layers: int, kernelsPerLayer: int, inputChannels: int, kernelSize: int):
         self.inputSize = inputSize
@@ -10,7 +15,8 @@ class CVModel:
         self.kernelsPerLayer = kernelsPerLayer
         self.inputChannels = inputChannels
         self.kernelSize = kernelSize
-        self.cnn = CNNVectorized(inputSize, inputSize, kernelSize, 1, layers, kernelsPerLayer, inputChannels)
+        self.poolerSize = 1
+        self.cnn = CNNVectorized(inputSize, inputSize, kernelSize, self.poolerSize, layers, kernelsPerLayer, inputChannels)
         self.mlp = NeuralNetwork(kernelsPerLayer * inputSize[0] * inputSize[1], 1, 32, outputs)
         self._last_cnn_output_shape: tuple[int, ...] | None = None
 
@@ -45,6 +51,42 @@ class CVModel:
                 f"Gradient size {len(mlp_grad)} does not match convolution output size {expected_size}"
             )
 
-        cnn_grad = np.asarray(mlp_grad, dtype=np.float32).reshape(self._last_cnn_output_shape)
+        cnn_grad = cp.asarray(mlp_grad, dtype=cp.float32).reshape(self._last_cnn_output_shape)
         self.cnn.backpropagateFromGradient(learningRate, cnn_grad)
         return self.mlp.last_loss
+
+    def __getstate__(self):
+        return {
+            "inputSize": self.inputSize,
+            "outputs": self.outputs,
+            "layers": self.layers,
+            "kernelsPerLayer": self.kernelsPerLayer,
+            "inputChannels": self.inputChannels,
+            "kernelSize": self.kernelSize,
+            "poolerSize": self.poolerSize,
+            "mlp": self.mlp,
+            "_last_cnn_output_shape": self._last_cnn_output_shape,
+            "cnn_state": self.cnn.__getstate__(),
+        }
+
+    def __setstate__(self, state):
+        self.inputSize = tuple(state["inputSize"])
+        self.outputs = state["outputs"]
+        self.layers = state["layers"]
+        self.kernelsPerLayer = state["kernelsPerLayer"]
+        self.inputChannels = state["inputChannels"]
+        self.kernelSize = state["kernelSize"]
+        self.poolerSize = state.get("poolerSize", 1)
+        self.mlp = state["mlp"]
+        self._last_cnn_output_shape = state.get("_last_cnn_output_shape")
+
+        self.cnn = CNNVectorized(
+            self.inputSize,
+            self.inputSize,
+            self.kernelSize,
+            self.poolerSize,
+            self.layers,
+            self.kernelsPerLayer,
+            self.inputChannels
+        )
+        self.cnn.__setstate__(state["cnn_state"])

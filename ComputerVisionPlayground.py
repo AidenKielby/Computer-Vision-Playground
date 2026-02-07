@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy, QProgressBar
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy, QProgressBar, QDoubleSpinBox
 from PySide6.QtCore import QTimer, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 import cv2
@@ -30,6 +30,7 @@ cvm = None
 train_screen = None
 t_screen = None
 u_screen = None
+tfv_screen = None
 
 class HomeScreen(QWidget):
     def __init__(self, stack):
@@ -200,10 +201,6 @@ class TrainScreen(QWidget):
         layout.addWidget(QPushButton("Start/Stop Training", clicked=self.train))
         self.setLayout(layout)
 
-        self.camera_label = QLabel()
-        self.camera_label.setFixedSize(640, 480)
-        layout.addWidget(self.camera_label)
-
         xy_layout = QGridLayout()
         xy_layout.setHorizontalSpacing(14)
         xy_layout.setVerticalSpacing(8)
@@ -215,6 +212,12 @@ class TrainScreen(QWidget):
         xy_layout.addWidget(self.outp_spin_box)
 
         layout.addLayout(xy_layout)
+
+        self.camera_label = QLabel()
+        self.camera_label.setFixedSize(640, 480)
+        self.camera_label.setAlignment(Qt.AlignCenter)
+        self.camera_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.camera_label)
 
         self.training_label = QLabel("Training: OFF")
         layout.addWidget(self.training_label)
@@ -281,10 +284,6 @@ class TrainScreen(QWidget):
         )
 
         self.camera_label.setPixmap(scaled_pixmap)
-        self.camera_label.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding
-        )
     
     def train(self):
         global cvm
@@ -343,6 +342,8 @@ class UseScreen(QWidget):
 
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(640, 480)
+        self.camera_label.setAlignment(Qt.AlignCenter)
+        self.camera_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout.addWidget(self.camera_label)
 
         self.using_label = QLabel("Using: OFF")
@@ -394,10 +395,6 @@ class UseScreen(QWidget):
         )
 
         self.camera_label.setPixmap(scaled_pixmap)
-        self.camera_label.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding
-        )
     
     def use(self):
         global cvm
@@ -455,8 +452,40 @@ class MakeTrainingInfoScreen(QWidget):
         layout.addWidget(QPushButton("Finished Collecting", clicked=self.done))
         self.setLayout(layout)
 
+        selector_row = QGridLayout()
+        selector_row.setHorizontalSpacing(12)
+        selector_row.setVerticalSpacing(6)
+        selector_row.addWidget(QLabel("Correct Output:"), 0, 0)
+        self.outp_spin_box = QSpinBox()
+        self.outp_spin_box.setMinimum(1)
+        self.outp_spin_box.setMaximum(cvm.outputs if cvm is not None else 1)
+        self.outp_spin_box.setFixedWidth(140)
+        selector_row.addWidget(self.outp_spin_box, 0, 1)
+
+        selector_row.addWidget(QLabel("Learning Rate:"), 1, 0)
+        self.learning_rate_spin = QDoubleSpinBox()
+        self.learning_rate_spin.setDecimals(5)
+        self.learning_rate_spin.setMinimum(0.0001)
+        self.learning_rate_spin.setMaximum(1.0)
+        self.learning_rate_spin.setSingleStep(0.0005)
+        self.learning_rate_spin.setValue(0.001)
+        self.learning_rate_spin.setFixedWidth(140)
+        selector_row.addWidget(self.learning_rate_spin, 1, 1)
+
+        selector_row.addWidget(QLabel("Epochs:"), 2, 0)
+        self.epochs_spin = QSpinBox()
+        self.epochs_spin.setMinimum(1)
+        self.epochs_spin.setMaximum(1000)
+        self.epochs_spin.setValue(20)
+        self.epochs_spin.setFixedWidth(140)
+        selector_row.addWidget(self.epochs_spin, 2, 1)
+
+        layout.addLayout(selector_row)
+
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(640, 480)
+        self.camera_label.setAlignment(Qt.AlignCenter)
+        self.camera_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout.addWidget(self.camera_label)
 
         self.training_label = QLabel("Collecting Data: OFF")
@@ -552,10 +581,18 @@ class MakeTrainingInfoScreen(QWidget):
         if cvm is None:
             return
 
+        self.outp_spin_box.setMaximum(max(1, cvm.outputs))
+        self.outp_spin_box.setValue(1)
         self.training_label.setText("Collecting Data: OFF")
         self.training = False
 
     def done(self):
+        global tfv_screen
+        if tfv_screen is not None:
+            tfv_screen.set_training_params(
+                learning_rate=self.learning_rate_spin.value(),
+                epochs=self.epochs_spin.value()
+            )
         self.stack.setCurrentIndex(6)
 
     def closeEvent(self, event):
@@ -591,6 +628,18 @@ class TrainFromVideos(QWidget):
         self.error = QLabel("Error: -")
         layout.addWidget(self.error)
 
+        batch_row = QGridLayout()
+        batch_row.setHorizontalSpacing(10)
+        batch_row.addWidget(QLabel("Batch Size:"), 0, 0)
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setMinimum(1)
+        self.batch_spin.setMaximum(256)
+        self.batch_spin.setValue(8)
+        self.batch_spin.setFixedWidth(120)
+        self.batch_spin.valueChanged.connect(self.update_batch_size)
+        batch_row.addWidget(self.batch_spin, 0, 1)
+        layout.addLayout(batch_row)
+
         self.eta_label = QLabel("Estimated time remaining: --")
         layout.addWidget(self.eta_label)
 
@@ -604,6 +653,15 @@ class TrainFromVideos(QWidget):
 
         self.epochs = 20
         self.learningRate = 0.001
+        self.worker = None
+    
+    def set_training_params(self, learning_rate: float, epochs: int):
+        self.learningRate = max(1e-6, float(learning_rate))
+        self.epochs = max(1, int(epochs))
+
+    def update_batch_size(self, value: int):
+        if self.worker is not None:
+            self.worker.set_batch_size(value)
 
     def go_to_screen1(self):
         self.stack.setCurrentIndex(0)
@@ -628,7 +686,8 @@ class TrainFromVideos(QWidget):
             video_paths=video_paths,
             cvm=cvm,
             learning_rate=self.learningRate,
-            epochs=self.epochs
+            epochs=self.epochs,
+            batch_size=self.batch_spin.value()
         )
 
         self.progress.setValue(0)
@@ -655,6 +714,7 @@ class TrainFromVideos(QWidget):
         self.progress.setValue(100)
         self.continue_btn.setEnabled(True)
         self.update_eta(0)
+        self.worker = None
 
     def update_eta(self, seconds):
         if seconds is None or seconds < 0:
@@ -679,16 +739,20 @@ class VideoTrainingWorker(QThread):
     error = Signal(float)
     eta = Signal(float)
 
-    def __init__(self, video_paths, cvm, learning_rate, epochs):
+    def __init__(self, video_paths, cvm, learning_rate, epochs, batch_size):
         super().__init__()
         self.video_paths = video_paths
         self.cvm = cvm
         self.learning_rate = learning_rate
         self._running = True
         self.epochs = epochs
+        self.batch_size = max(1, batch_size)
 
     def stop(self):
         self._running = False
+
+    def set_batch_size(self, value: int):
+        self.batch_size = max(1, int(value))
 
     def run(self):
         if not self.video_paths or self.epochs <= 0:
@@ -716,6 +780,8 @@ class VideoTrainingWorker(QThread):
         total_work = total_frames_per_epoch * self.epochs
         processed_global = 0
         start_time = time.time()
+        batch_inputs = []
+        batch_expected = []
 
         for _ in range(self.epochs):
             if not self._running:
@@ -736,26 +802,33 @@ class VideoTrainingWorker(QThread):
 
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     tensor = self.frame_to_tensor(frame_rgb, self.cvm.inputSize[0])
-
-                    output = self.cvm.forwardPass(tensor)
                     expected = self.get_expected_output(path)
 
-                    lastE = self.cvm.backpropigate(expected, self.learning_rate)
-                    self.error.emit(lastE)
+                    batch_inputs.append(tensor)
+                    batch_expected.append(expected)
 
-                    processed_global += 1
-                    fraction = processed_global / total_work
-                    percent = int(fraction * 100)
-                    self.progress.emit(min(100, percent))
-
-                    if processed_global > 0:
-                        elapsed = max(1e-6, time.time() - start_time)
-                        rate = elapsed / processed_global
-                        remaining = max(0, total_work - processed_global)
-                        eta_seconds = rate * remaining
-                        self.eta.emit(eta_seconds)
+                    if len(batch_inputs) >= self.batch_size:
+                        processed_global = self._train_batch(
+                            batch_inputs,
+                            batch_expected,
+                            processed_global,
+                            total_work,
+                            start_time
+                        )
 
                 cap.release()
+
+        if self._running and batch_inputs:
+            processed_global = self._train_batch(
+                batch_inputs,
+                batch_expected,
+                processed_global,
+                total_work,
+                start_time
+            )
+        elif not self._running:
+            batch_inputs.clear()
+            batch_expected.clear()
 
         if processed_global >= total_work:
             self.progress.emit(100)
@@ -773,6 +846,31 @@ class VideoTrainingWorker(QThread):
     def get_expected_output(self, path):
         idx = int(os.path.basename(path).split("_")[-1].split(".")[0])
         return [1.0 if i + 1 == idx else 0.0 for i in range(self.cvm.outputs)]
+
+    def _train_batch(self, batch_inputs, batch_expected, processed_global, total_work, start_time):
+        if not batch_inputs:
+            return processed_global
+
+        batch_len = len(batch_inputs)
+        avg_loss = self.cvm.train_on_batch(batch_inputs, batch_expected, self.learning_rate)
+        if avg_loss is not None:
+            self.error.emit(avg_loss)
+
+        processed_global += batch_len
+        fraction = processed_global / total_work if total_work else 1
+        percent = int(fraction * 100)
+        self.progress.emit(min(100, percent))
+
+        if processed_global > 0 and total_work:
+            elapsed = max(1e-6, time.time() - start_time)
+            rate = elapsed / processed_global
+            remaining = max(0, total_work - processed_global)
+            eta_seconds = rate * remaining
+            self.eta.emit(eta_seconds)
+
+        batch_inputs.clear()
+        batch_expected.clear()
+        return processed_global
 
 app = QApplication(sys.argv)
 app.setStyleSheet(
@@ -874,6 +972,7 @@ screen7 = TrainFromVideos(stack)
 train_screen = screen6
 t_screen = screen5
 u_screen = screen4
+tfv_screen = screen7
 
 stack.addWidget(screen1)
 stack.addWidget(screen2)

@@ -125,7 +125,7 @@ class CreateNewScreen(QWidget):
         self.size_spin_box.setMaximum(100)
         self.size_spin_box.setSingleStep(1)
         self.size_spin_box.setFixedWidth(140)
-        xy_layout.addWidget(QLabel("S x S:"))
+        xy_layout.addWidget(QLabel("Size x Size:"))
         xy_layout.addWidget(self.size_spin_box)
 
         self.kernel_spin_box = QSpinBox()
@@ -457,18 +457,6 @@ class MakeTrainingInfoScreen(QWidget):
         self.camera_label = QLabel()
         self.camera_label.setFixedSize(640, 480)
         layout.addWidget(self.camera_label)
-
-        xy_layout = QGridLayout()
-        xy_layout.setHorizontalSpacing(14)
-        xy_layout.setVerticalSpacing(8)
-        self.outp_spin_box = QSpinBox()
-        self.outp_spin_box.setMinimum(1)
-        self.outp_spin_box.setMaximum(cvm.outputs if cvm!=None else 1)
-        self.outp_spin_box.setFixedWidth(120)
-        xy_layout.addWidget(QLabel("Correct Output:"))
-        xy_layout.addWidget(self.outp_spin_box)
-
-        layout.addLayout(xy_layout)
 
         self.training_label = QLabel("Collecting Data: OFF")
         layout.addWidget(self.training_label)

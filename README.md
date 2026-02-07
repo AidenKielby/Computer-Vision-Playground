@@ -2,8 +2,6 @@
 
 This is probably one of the projects I have cared about the most. It fuses my convolutional network from the (currently shelved) diffusion-model experiments with the multilayer perceptron from my earlier neural-network work, creating a playground for building simple computer-vision ideas.
 
-The gui is purposely bad, however currently not the 'bad' im looking for. My plan is to make it look more like the clasic Tkinter GUI, because for some reason i like it.
-
 ### Prerequisites
 - Python 3.9 or higher
 - Webcam
@@ -50,6 +48,7 @@ pip install cupy-cuda12x
 - Add better telemetry (loss plots, per-class confidence readouts) to understand what the live loop is learning.
 
 - Explore lightweight data augmentation for more stable real-time training.
+
 
 
 

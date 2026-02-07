@@ -551,8 +551,6 @@ class MakeTrainingInfoScreen(QWidget):
         if cvm is None:
             return
 
-        self.outp_spin_box.setMaximum(max(1, cvm.outputs))
-        self.outp_spin_box.setValue(1)
         self.training_label.setText("Collecting Data: OFF")
         self.training = False
 

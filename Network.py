@@ -1,10 +1,5 @@
 import math
 import random
-import pickle
-import os
-import numpy as np
-import re
-import matplotlib.pyplot as plt
 
 class NeuralNetwork:
     def __init__(self, inputNeurons: int, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):

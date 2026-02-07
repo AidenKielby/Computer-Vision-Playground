@@ -8,6 +8,23 @@ import os
 import pickle
 from CVModel import CVModel
 
+
+TK_BG = "#f0f0f0"
+TK_BTN = "#d9d9d9"
+TK_BORDER = "#a3a3a3"
+
+
+def apply_tk_layout(layout):
+    layout.setContentsMargins(40, 25, 40, 25)
+    layout.setSpacing(12)
+
+
+def make_tk_header(text: str) -> QLabel:
+    header = QLabel(text)
+    header.setAlignment(Qt.AlignHCenter)
+    header.setObjectName("tkHeader")
+    return header
+
 cvm = None
 train_screen = None
 t_screen = None
@@ -18,6 +35,8 @@ class HomeScreen(QWidget):
         super().__init__()
         self.stack = stack
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Computer Vision Playground"))
         layout.addWidget(QPushButton("Load", clicked=self.go_to_screen1))
         layout.addWidget(QPushButton("Create New", clicked=self.go_to_screen2))
         self.setLayout(layout)
@@ -33,6 +52,7 @@ class Placeholder(QWidget):
         super().__init__()
         self.stack = stack
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
         self.setLayout(layout)
 
 class Load(QWidget):
@@ -41,11 +61,14 @@ class Load(QWidget):
         self.stack = stack
         self.setWindowTitle("Load CV Model")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Load CV Model"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         self.setLayout(layout)
 
         self.line_edit = QLineEdit()
         self.line_edit.setPlaceholderText("Model To Load (no .pkl)")
+        self.line_edit.setFixedWidth(240)
         layout.addWidget(self.line_edit)
 
         button = QPushButton("Load And Train")
@@ -55,6 +78,7 @@ class Load(QWidget):
         button1 = QPushButton("Load And Use")
         button1.clicked.connect(self.load_use)
         layout.addWidget(button1)
+        layout.addStretch()
 
     def load_train(self):
         global cvm
@@ -87,14 +111,20 @@ class CreateNewScreen(QWidget):
         self.stack = stack
         self.setWindowTitle("Create New CV Model")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Create New CV Model"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         self.setLayout(layout)
 
         xy_layout = QGridLayout()
+        xy_layout.setHorizontalSpacing(16)
+        xy_layout.setVerticalSpacing(10)
 
         self.size_spin_box = QSpinBox()
         self.size_spin_box.setMinimum(0)
         self.size_spin_box.setMaximum(100)
+        self.size_spin_box.setSingleStep(1)
+        self.size_spin_box.setFixedWidth(140)
         xy_layout.addWidget(QLabel("S x S:"))
         xy_layout.addWidget(self.size_spin_box)
 
@@ -102,24 +132,33 @@ class CreateNewScreen(QWidget):
         self.kernel_spin_box.setMinimum(1)
         self.kernel_spin_box.setMaximum(7)
         self.kernel_spin_box.setSingleStep(2)
+        self.kernel_spin_box.setFixedWidth(140)
         xy_layout.addWidget(QLabel("Kernel Size:"))
         xy_layout.addWidget(self.kernel_spin_box)
+        kernel_hint = QLabel("* Kernel size must be an odd number")
+        xy_layout.addWidget(kernel_hint, 2, 0, 1, 2)
 
         self.layer_spin_box = QSpinBox()
         self.layer_spin_box.setMinimum(1)
         self.layer_spin_box.setMaximum(50)
+        self.layer_spin_box.setSingleStep(1)
+        self.layer_spin_box.setFixedWidth(140)
         xy_layout.addWidget(QLabel("Layers:"))
         xy_layout.addWidget(self.layer_spin_box)
 
         self.kpl_spin_box = QSpinBox()
         self.kpl_spin_box.setMinimum(1)
         self.kpl_spin_box.setMaximum(50)
+        self.kpl_spin_box.setSingleStep(1)
+        self.kpl_spin_box.setFixedWidth(140)
         xy_layout.addWidget(QLabel("Kernels/Layer:"))
         xy_layout.addWidget(self.kpl_spin_box)
 
         self.outp_spin_box = QSpinBox()
         self.outp_spin_box.setMinimum(1)
         self.outp_spin_box.setMaximum(50)
+        self.outp_spin_box.setSingleStep(1)
+        self.outp_spin_box.setFixedWidth(140)
         xy_layout.addWidget(QLabel("outputs:"))
         xy_layout.addWidget(self.outp_spin_box)
 
@@ -131,6 +170,7 @@ class CreateNewScreen(QWidget):
 
         layout.addLayout(xy_layout)
         layout.addWidget(self.result_label)
+        layout.addStretch()
         
         self.setLayout(layout)
 
@@ -153,6 +193,8 @@ class TrainScreen(QWidget):
         self.stack = stack
         self.setWindowTitle("Train Model")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Live Training"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         layout.addWidget(QPushButton("Start/Stop Training", clicked=self.train))
         self.setLayout(layout)
@@ -162,9 +204,12 @@ class TrainScreen(QWidget):
         layout.addWidget(self.camera_label)
 
         xy_layout = QGridLayout()
+        xy_layout.setHorizontalSpacing(14)
+        xy_layout.setVerticalSpacing(8)
         self.outp_spin_box = QSpinBox()
         self.outp_spin_box.setMinimum(1)
         self.outp_spin_box.setMaximum(cvm.outputs if cvm!=None else 1)
+        self.outp_spin_box.setFixedWidth(120)
         xy_layout.addWidget(QLabel("Correct Output:"))
         xy_layout.addWidget(self.outp_spin_box)
 
@@ -182,8 +227,10 @@ class TrainScreen(QWidget):
         self.learning_rate_in = QSpinBox()
         self.learning_rate_in.setMinimum(0)
         self.learning_rate_in.setMaximum(10000)
+        self.learning_rate_in.setFixedWidth(140)
         layout.addWidget(QLabel("Learning Rate (/10000):"))
         layout.addWidget(self.learning_rate_in)
+        layout.addStretch()
 
         self.learning_rate = self.learning_rate_in.value()
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -287,6 +334,8 @@ class UseScreen(QWidget):
         self.stack = stack
         self.setWindowTitle("Use Model")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Use Model"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         layout.addWidget(QPushButton("Start/Stop", clicked=self.use))
         self.setLayout(layout)
@@ -300,6 +349,7 @@ class UseScreen(QWidget):
 
         self.last_output = QLabel("Last Output: -")
         layout.addWidget(self.last_output)
+        layout.addStretch()
 
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
@@ -397,6 +447,8 @@ class MakeTrainingInfoScreen(QWidget):
         self.stack = stack
         self.setWindowTitle("Train Model")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Collect Training Clips"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
         layout.addWidget(QPushButton("Start/Stop Collecting", clicked=self.train))
         layout.addWidget(QPushButton("Finished Collecting", clicked=self.done))
@@ -407,9 +459,12 @@ class MakeTrainingInfoScreen(QWidget):
         layout.addWidget(self.camera_label)
 
         xy_layout = QGridLayout()
+        xy_layout.setHorizontalSpacing(14)
+        xy_layout.setVerticalSpacing(8)
         self.outp_spin_box = QSpinBox()
         self.outp_spin_box.setMinimum(1)
         self.outp_spin_box.setMaximum(cvm.outputs if cvm!=None else 1)
+        self.outp_spin_box.setFixedWidth(120)
         xy_layout.addWidget(QLabel("Correct Output:"))
         xy_layout.addWidget(self.outp_spin_box)
 
@@ -417,6 +472,7 @@ class MakeTrainingInfoScreen(QWidget):
 
         self.training_label = QLabel("Collecting Data: OFF")
         layout.addWidget(self.training_label)
+        layout.addStretch()
 
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
@@ -534,6 +590,8 @@ class TrainFromVideos(QWidget):
         self.stack = stack
         self.setWindowTitle("Train From Videos")
         layout = QVBoxLayout()
+        apply_tk_layout(layout)
+        layout.addWidget(make_tk_header("Train From Saved Clips"))
         layout.addWidget(QPushButton("Home", clicked=self.go_to_screen1))
 
         self.progress = QProgressBar()
@@ -669,6 +727,93 @@ class VideoTrainingWorker(QThread):
         return [1.0 if i + 1 == idx else 0.0 for i in range(self.cvm.outputs)]
 
 app = QApplication(sys.argv)
+app.setStyleSheet(
+    f"""
+    QWidget {{
+        background-color: {TK_BG};
+        font-family: 'Segoe UI';
+        color: #000;
+        font-size: 14px;
+    }}
+    #tkHeader {{
+        font-size: 22px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }}
+    QPushButton {{
+        background-color: {TK_BTN};
+        border: 2px solid {TK_BORDER};
+        padding: 4px 12px;
+        min-width: 140px;
+    }}
+    QPushButton:pressed {{
+        background-color: #c0c0c0;
+    }}
+    QLineEdit {{
+        background-color: #ffffff;
+        border: 2px solid {TK_BORDER};
+        padding: 4px;
+    }}
+    QSpinBox {{
+        background-color: #ffffff;
+        border: 2px solid {TK_BORDER};
+        padding: 4px;
+        padding-right: 26px;
+    }}
+    QSpinBox::up-button {{
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+        width: 20px;
+        border-left: 1px solid {TK_BORDER};
+        border-bottom: 1px solid {TK_BORDER};
+        background: {TK_BTN};
+        padding: 0px;
+    }}
+    QSpinBox::down-button {{
+        subcontrol-origin: padding;
+        subcontrol-position: bottom right;
+        width: 20px;
+        border-left: 1px solid {TK_BORDER};
+        border-top: 1px solid {TK_BORDER};
+        background: {TK_BTN};
+        padding: 0px;
+    }}
+    QSpinBox::up-button:pressed,
+    QSpinBox::down-button:pressed {{
+        background: #c0c0c0;
+    }}
+    QSpinBox::up-button:disabled,
+    QSpinBox::down-button:disabled {{
+        background: #e4e4e4;
+    }}
+    QSpinBox::up-arrow {{
+        image: url(:/qt-project.org/styles/commonstyle/images/arrowup.png);
+        width: 8px;
+        height: 6px;
+    }}
+    QSpinBox::down-arrow {{
+        image: url(:/qt-project.org/styles/commonstyle/images/arrowdown.png);
+        width: 8px;
+        height: 6px;
+    }}
+    QSpinBox::up-arrow:disabled,
+    QSpinBox::down-arrow:disabled {{
+        image: none;
+    }}
+    QProgressBar {{
+        border: 2px solid {TK_BORDER};
+        background: #ffffff;
+        height: 22px;
+    }}
+    QProgressBar::chunk {{
+        background-color: #4f81bd;
+        margin: 1px;
+    }}
+    QLabel {{
+        font-size: 14px;
+    }}
+    """
+)
 stack = QStackedWidget()
 
 screen1 = HomeScreen(stack)

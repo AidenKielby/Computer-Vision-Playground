@@ -178,7 +178,15 @@ class CreateNewScreen(QWidget):
 
     def createCV(self):
         global cvm, train_screen
-        cvm = CVModel([self.layer_spin_box.value(), self.layer_spin_box.value()], self.outp_spin_box.value(), self.layer_spin_box.value(), self.kpl_spin_box.value(), 3, self.kernel_spin_box.value())
+        input_size = self.size_spin_box.value()
+        cvm = CVModel(
+            (input_size, input_size),
+            self.outp_spin_box.value(),
+            self.layer_spin_box.value(),
+            self.kpl_spin_box.value(),
+            3,
+            self.kernel_spin_box.value()
+        )
         if train_screen is not None:
             train_screen.refresh_model()
         self.stack.setCurrentIndex(5)

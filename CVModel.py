@@ -17,7 +17,7 @@ class CVModel:
         self.kernelSize = kernelSize
         self.poolerSize = 1
         self.cnn = CNNVectorized(inputSize, inputSize, kernelSize, self.poolerSize, layers, kernelsPerLayer, inputChannels)
-        self.mlp = NeuralNetwork(kernelsPerLayer * inputSize[0] * inputSize[1], 1, 32, outputs)
+        self.mlp = NeuralNetwork(kernelsPerLayer * inputSize[0] * inputSize[1], 10, 32, outputs)
         self._last_cnn_output_shape: tuple[int, ...] | None = None
         self._last_flat_batch: np.ndarray | None = None
 

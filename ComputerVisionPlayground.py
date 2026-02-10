@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy, QProgressBar, QDoubleSpinBox
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget, QStackedWidget, QLineEdit, QPushButton, QLabel, QSpinBox, QGridLayout, QSizePolicy, QProgressBar, QDoubleSpinBox, QScrollArea
 from PySide6.QtCore import QTimer, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 import cv2
@@ -359,6 +359,22 @@ class UseScreen(QWidget):
 
         self.last_output = QLabel("Last Output: -")
         layout.addWidget(self.last_output)
+
+        layout.addWidget(make_tk_header("CNN Feature Maps"))
+
+        self.feature_scroll = QScrollArea()
+        self.feature_scroll.setWidgetResizable(True)
+        self.feature_container = QWidget()
+        self.feature_grid = QGridLayout()
+        self.feature_grid.setContentsMargins(0, 0, 0, 0)
+        self.feature_grid.setSpacing(6)
+        self.feature_container.setLayout(self.feature_grid)
+        self.feature_scroll.setWidget(self.feature_container)
+        layout.addWidget(self.feature_scroll)
+
+        self.feature_labels: list[QLabel] = []
+        self.feature_buffers: list[np.ndarray | None] = []
+        self.feature_columns = 5
         layout.addStretch()
 
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -389,6 +405,9 @@ class UseScreen(QWidget):
                 output = cvm.forwardPass(tensor)
                 if output is not None:
                     self.last_output.setText(f"Last Output: {output}")
+                feature_maps = cvm.get_last_feature_maps()
+                if feature_maps is not None:
+                    self.update_feature_maps_display(feature_maps)
 
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
@@ -433,6 +452,7 @@ class UseScreen(QWidget):
 
         self.using_label.setText("Using: OFF")
         self.using = False
+        self.clear_feature_grid()
 
     def closeEvent(self, event):
         if self.timer.isActive():
@@ -440,6 +460,57 @@ class UseScreen(QWidget):
         if self.cap.isOpened():
             self.cap.release()
         super().closeEvent(event)
+
+    def clear_feature_grid(self):
+        for label in self.feature_labels:
+            self.feature_grid.removeWidget(label)
+            label.deleteLater()
+        self.feature_labels = []
+        self.feature_buffers = []
+
+    def update_feature_maps_display(self, feature_maps: np.ndarray):
+        if feature_maps.ndim != 3:
+            self.clear_feature_grid()
+            return
+
+        channels = feature_maps.shape[0]
+        if channels <= 0:
+            self.clear_feature_grid()
+            return
+
+        if len(self.feature_labels) != channels:
+            self.clear_feature_grid()
+            for idx in range(channels):
+                label = QLabel()
+                label.setFixedSize(96, 96)
+                label.setAlignment(Qt.AlignCenter)
+                row = idx // self.feature_columns
+                col = idx % self.feature_columns
+                self.feature_grid.addWidget(label, row, col)
+                self.feature_labels.append(label)
+                self.feature_buffers.append(None)
+
+        for idx in range(channels):
+            fmap = feature_maps[idx]
+            min_val = float(np.min(fmap))
+            max_val = float(np.max(fmap))
+            if np.isclose(min_val, max_val):
+                normalized = np.zeros_like(fmap, dtype=np.float32)
+            else:
+                normalized = (fmap - min_val) / (max_val - min_val)
+
+            buffer = (normalized * 255.0).clip(0, 255).astype(np.uint8)
+            self.feature_buffers[idx] = buffer
+            height, width = buffer.shape
+            bytes_per_line = width
+            qimage = QImage(buffer.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+            pixmap = QPixmap.fromImage(qimage).scaled(
+                self.feature_labels[idx].width(),
+                self.feature_labels[idx].height(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.feature_labels[idx].setPixmap(pixmap)
 
 class MakeTrainingInfoScreen(QWidget):
     def __init__(self, stack):
@@ -662,6 +733,7 @@ class TrainFromVideos(QWidget):
         self.epochs = 20
         self.learningRate = 0.001
         self.worker = None
+        self._stopping_worker = False
     
     def set_training_params(self, learning_rate: float, epochs: int):
         self.learningRate = max(1e-6, float(learning_rate))
@@ -672,6 +744,7 @@ class TrainFromVideos(QWidget):
             self.worker.set_batch_size(value)
 
     def go_to_screen1(self):
+        self.stop_training(wait=True)
         self.stack.setCurrentIndex(0)
 
     def save_and_done(self):
@@ -684,6 +757,8 @@ class TrainFromVideos(QWidget):
     def start_training(self):
         global cvm
         if cvm == None:
+            return
+        if self.worker is not None:
             return
 
         video_paths = [
@@ -709,19 +784,34 @@ class TrainFromVideos(QWidget):
 
         self.worker.start()
 
-    def stop_training(self):
+    def stop_training(self, wait: bool = False):
         if self.worker:
-            self.worker.stop()
+            self._stopping_worker = True
+            worker = self.worker
+            worker.stop()
+            if wait:
+                worker.wait()
+            self.worker = None
+            self._stopping_worker = False
 
     def showEvent(self, event):
         super().showEvent(event)
         if cvm is not None:
             self.start_training()
 
+    def hideEvent(self, event):
+        self.stop_training(wait=True)
+        super().hideEvent(event)
+
     def training_done(self):
-        self.progress.setValue(100)
-        self.continue_btn.setEnabled(True)
-        self.update_eta(0)
+        if self._stopping_worker:
+            self.progress.setValue(0)
+            self.update_eta(-1)
+            self.continue_btn.setEnabled(False)
+        else:
+            self.progress.setValue(100)
+            self.continue_btn.setEnabled(True)
+            self.update_eta(0)
         self.worker = None
 
     def update_eta(self, seconds):

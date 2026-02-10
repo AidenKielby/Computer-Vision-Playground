@@ -1,226 +1,181 @@
-import math
-import random
+import numpy as np
+
 
 class NeuralNetwork:
     def __init__(self, inputNeurons: int, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
-        # this part should be self explanitory
         self.inputNeurons = inputNeurons
         self.hiddenLayers = hiddenLayers
         self.neuronsPerHiddenLayer = neuronsPerHiddenLayer
         self.outputNeurons = outputNeurons
+        self.dtype = np.float32
+        self._rng = np.random.default_rng()
+
         self.neurons = self.initNeurons(inputNeurons, hiddenLayers, neuronsPerHiddenLayer, outputNeurons)
         self.weights = self.initWeights(inputNeurons, hiddenLayers, neuronsPerHiddenLayer, outputNeurons)
-        self.biases = self.initBiases(inputNeurons, hiddenLayers, neuronsPerHiddenLayer, outputNeurons)
-        self.preActivations = [[] for x in range(self.hiddenLayers + 2)]
-        self.last_loss = None
+        self.biases = self.initBiases(hiddenLayers, neuronsPerHiddenLayer, outputNeurons)
 
-    def sigmoid(self, x):
-        return 1 / (1 + (math.pow(math.e, -x)))
+        self.preActivations: list[list[float]] = [[] for _ in range(self.hiddenLayers + 1)]
+        self._activations: list[np.ndarray] = []
+        self._z_values: list[np.ndarray] = []
+        self._input_vector: np.ndarray | None = None
+        self.last_loss: float | None = None
 
-    def leakyReLU(self, x):
-        return x if x > 0 else x * 0.1
+    def _he_limit(self, fan_in: int) -> float:
+        return np.sqrt(2.0 / max(1, fan_in))
 
-    def leakyReLU_derivative(self, x):
-        return 1 if x > 0 else 0.1
+    def _leaky_relu(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, x, 0.1 * x)
 
-    def softmax(self, x):
-        e_x = [math.exp(i) for i in x]
-        total = sum(e_x)
-        if total == 0:
-            print(e_x)
-        return [i / total for i in e_x]
+    def _leaky_relu_derivative(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, 1.0, 0.1)
+
+    def _sigmoid(self, x: np.ndarray) -> np.ndarray:
+        return 1.0 / (1.0 + np.exp(-x))
+
+    def _softmax(self, x: np.ndarray) -> np.ndarray:
+        shifted = x - np.max(x)
+        exps = np.exp(shifted)
+        return exps / np.sum(exps)
 
     def addInputs(self, inputs: list[float]):
-        if len(inputs) == len(self.neurons[0]):
-            self.neurons[0] = inputs
+        if len(inputs) != self.inputNeurons:
+            raise ValueError("Input length does not match network input size")
+        self.neurons[0] = inputs[:]
+        self._input_vector = np.asarray(inputs, dtype=self.dtype)
 
     def initNeurons(self, inputNeurons: int, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
-        neurons = []
-        l1 = [0 for i in range(inputNeurons)]
-        neurons.append(l1)
-
-        for layer in range(hiddenLayers):
-            l = [0 for i in range(neuronsPerHiddenLayer)]
-            neurons.append(l)
-
-        ln = [0 for i in range(outputNeurons)]
-        neurons.append(ln)
-
+        neurons = [[0.0 for _ in range(inputNeurons)]]
+        for _ in range(hiddenLayers):
+            neurons.append([0.0 for _ in range(neuronsPerHiddenLayer)])
+        neurons.append([0.0 for _ in range(outputNeurons)])
         return neurons
 
     def initWeights(self, inputNeurons: int, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
-        # weights -> layer -> toNeuron(index) -> from neuron(index)
-
-        globalInitialWeightValue = 1
-
-        weights = []
-
-        inputWeights = []
-        for i in range(neuronsPerHiddenLayer):
-            inputWeights.append([random.uniform(-1, 1) * math.sqrt(2 / inputNeurons) for i in range(inputNeurons)])
-        weights.append(inputWeights)
-
-        for i in range(hiddenLayers-1):
-            layerWeights = []
-            for i in range(neuronsPerHiddenLayer):
-                layerWeights.append([random.uniform(-1, 1) * math.sqrt(2 / inputNeurons) for i in range(neuronsPerHiddenLayer)])
-            weights.append(layerWeights)
-
-        outputWeights = []
-        for i in range(outputNeurons):
-            outputWeights.append([random.uniform(-1, 1) * math.sqrt(2 / inputNeurons) for i in range(neuronsPerHiddenLayer)])
-        weights.append(outputWeights)
-
+        weights: list[np.ndarray] = []
+        fan_in = inputNeurons
+        for _ in range(hiddenLayers):
+            limit = self._he_limit(fan_in)
+            layer = self._rng.uniform(-limit, limit, size=(neuronsPerHiddenLayer, fan_in)).astype(self.dtype)
+            weights.append(layer)
+            fan_in = neuronsPerHiddenLayer
+        limit = self._he_limit(fan_in)
+        weights.append(self._rng.uniform(-limit, limit, size=(outputNeurons, fan_in)).astype(self.dtype))
         return weights
 
-    def initBiases(self, inputNeurons: int, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
-        # due to the input layer not having a bias, all other layers must be acceses as if it was for the layer brfore it
-        # for example, for hidden layer number 1 (index 1 for all neurons), you would have to do index 0
-        biases = []
-
-        for i in range(hiddenLayers):
-            layerBiases = [random.uniform(-0.01, 0.01) for _ in range(neuronsPerHiddenLayer)]
-            biases.append(layerBiases)
-
-        outputLayerBiases = [0 for i in range(outputNeurons)]
-        biases.append(outputLayerBiases)
-
+    def initBiases(self, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
+        biases: list[np.ndarray] = []
+        for _ in range(hiddenLayers):
+            biases.append(np.zeros(neuronsPerHiddenLayer, dtype=self.dtype))
+        biases.append(np.zeros(outputNeurons, dtype=self.dtype))
         return biases
 
     def forwardPass(self):
-        self.preActivations = [[] for x in range(self.hiddenLayers + 2)]
+        if self._input_vector is None:
+            raise RuntimeError("Inputs must be added before calling forwardPass")
 
-        for layerIndex in range(self.hiddenLayers):
-            layer = self.neurons[layerIndex+1]
-            for neuronIndex in range(len(layer)):
-                sum = 0
-                for fromNeuronIndex in range(len(self.neurons[layerIndex])):
-                    fromNeuron = self.neurons[layerIndex][fromNeuronIndex]
-                    sum += fromNeuron * self.weights[layerIndex][neuronIndex][fromNeuronIndex]
-                sum += self.biases[layerIndex][neuronIndex]
+        activations: list[np.ndarray] = [self._input_vector]
+        z_values: list[np.ndarray] = []
 
-                # store raw_sum for derivative use
-                self.preActivations[layerIndex].append(sum)
-                self.neurons[layerIndex+1][neuronIndex] = self.leakyReLU(sum)
+        for layer_idx, (weights, bias) in enumerate(zip(self.weights, self.biases)):
+            z = weights @ activations[-1] + bias
+            z_values.append(z)
+            if layer_idx == len(self.weights) - 1:
+                if self.outputNeurons == 1:
+                    a = self._sigmoid(z)
+                else:
+                    a = self._softmax(z)
+            else:
+                a = self._leaky_relu(z)
+            activations.append(a.astype(self.dtype))
 
-        layerIndex = self.hiddenLayers+1
-        layer = self.neurons[layerIndex]
-        if len(self.neurons[-1]) == 1:
-            for neuronIndex in range(len(layer)):
-                sum = 0
-                for fromNeuronIndex in range(len(self.neurons[layerIndex-1])):
-                    fromNeuron = self.neurons[layerIndex-1][fromNeuronIndex]
-                    sum += fromNeuron * self.weights[layerIndex-1][neuronIndex][fromNeuronIndex]
-                sum += self.biases[layerIndex-1][neuronIndex]
+        self._activations = activations
+        self._z_values = z_values
 
-                # store raw_sum for derivative use
-                self.preActivations[layerIndex].append(sum)
-                self.neurons[layerIndex][neuronIndex] = self.sigmoid(sum)
-        else:
-            sums = []
-            for neuronIndex in range(len(layer)):
-                total = 0
-                for fromNeuronIndex in range(len(self.neurons[layerIndex - 1])):
-                    total += self.neurons[layerIndex - 1][fromNeuronIndex] * self.weights[layerIndex - 1][neuronIndex][
-                        fromNeuronIndex]
-                total += self.biases[layerIndex - 1][neuronIndex]
-                sums.append(total)
-            self.neurons[layerIndex] = self.softmax(sums)
-
-    def cross_entropy(output, target):
-        return -sum(t * math.log(o + 1e-9) for o, t in zip(output, target))
+        for idx, act in enumerate(self._activations):
+            self.neurons[idx] = act.tolist()
+        self.preActivations = [z.tolist() for z in self._z_values]
 
     def MSE(self, networkOutput, actualAnswer):
-        sum = 0
-        for i in range(len(networkOutput)):
-            sum += math.pow((networkOutput[i] - actualAnswer[i]), 2)
-        return (1 / (len(networkOutput))) * sum
+        output = np.asarray(networkOutput, dtype=self.dtype)
+        target = np.asarray(actualAnswer, dtype=self.dtype)
+        diff = output - target
+        return float(np.mean(diff * diff))
 
     def BCE(self, output, target):
-        return -sum(t * math.log(o + 1e-9) + (1 - t) * math.log(1 - o + 1e-9) for o, t in zip(output, target))
+        out = np.clip(np.asarray(output, dtype=self.dtype), 1e-9, 1 - 1e-9)
+        tgt = np.asarray(target, dtype=self.dtype)
+        return float(-np.sum(tgt * np.log(out) + (1 - tgt) * np.log(1 - out)))
+
+    def _categorical_cross_entropy(self, output, target):
+        out = np.clip(np.asarray(output, dtype=self.dtype), 1e-9, 1.0)
+        tgt = np.asarray(target, dtype=self.dtype)
+        return float(-np.sum(tgt * np.log(out)))
 
     def backpropagate(self, correctOutput: list[float], learningRate: float):
-        loss = self.BCE(self.neurons[-1], correctOutput)
-        self.last_loss = loss
-        allLayerWeightGradients = []
-        allErrorTerms = []
+        if not self._activations or not self._z_values:
+            raise RuntimeError("forwardPass must be called before backpropagate")
 
-        outputErrorTerms = []
-        outputNeurons = self.neurons[-1]
-        outputWeightGradients = []
-        prevNeurons = self.neurons[len(self.neurons) - 2]
-        outputErrorTerms = [o - t for o, t in zip(outputNeurons, correctOutput)]
-        # find the gradient in the output neuron set
-        for neuronIndex in range(len(outputNeurons)):
+        target = np.asarray(correctOutput, dtype=self.dtype)
+        output = self._activations[-1]
+        if target.shape != output.shape:
+            target = target.reshape(output.shape)
 
-            layerGradient = []
-            for prevNeuronIndex in range(len(prevNeurons)):
-                layerGradient.append(outputErrorTerms[neuronIndex] * prevNeurons[prevNeuronIndex])
-            outputWeightGradients.append(layerGradient)
+        if self.outputNeurons == 1:
+            self.last_loss = self.BCE(output, target)
+            delta = output - target
+        else:
+            self.last_loss = self._categorical_cross_entropy(output, target)
+            delta = output - target
 
-        allLayerWeightGradients.insert(0, outputWeightGradients)
-        allErrorTerms.insert(0, outputErrorTerms)
+        input_grad = np.zeros(self.inputNeurons, dtype=self.dtype)
 
-        layerContributions = []
-        lastErrorTerms = outputErrorTerms[:]
-        # find the contributions of all hidden layers based off previous layers & error terms
-        for layerIndex in range(self.hiddenLayers):
-            trueLayerIndex = (self.hiddenLayers) - layerIndex
+        for layer_idx in reversed(range(len(self.weights))):
+            weights = self.weights[layer_idx]
+            a_prev = self._activations[layer_idx]
 
-            layer = self.neurons[trueLayerIndex]
-            layerContribution = []
-            # contribution
-            for neuronIndex in range(len(layer)):
-                sum = 0
-                for forwardNeuronIndex in range(len(self.neurons[trueLayerIndex+1])):
-                    sum += (self.weights[trueLayerIndex][forwardNeuronIndex][neuronIndex] *
-                            lastErrorTerms[forwardNeuronIndex])
-                layerContribution.append(sum)
-            layerContributions.insert(0, layerContribution)
+            grad_w = np.outer(delta, a_prev)
+            grad_b = delta
 
-            newErrorTerms = []
-            layerGrandients = []
-            prevNeurons = self.neurons[trueLayerIndex - 1]
-            # error terms
-            for neuronIndex in range(len(layer)):
-                pre_act = self.preActivations[trueLayerIndex - 1][neuronIndex]
-                derivative = self.leakyReLU_derivative(pre_act)
-                newErrorTerms.append(layerContribution[neuronIndex] * derivative)
+            if layer_idx == 0:
+                input_grad = weights.T @ delta
+            else:
+                delta = (weights.T @ delta) * self._leaky_relu_derivative(self._z_values[layer_idx - 1])
 
-                layerGradient = []
-                for prevNeuronIndex in range(len(prevNeurons)):
-                    layerGradient.append(newErrorTerms[neuronIndex] * prevNeurons[prevNeuronIndex])
-                layerGrandients.append( layerGradient)
-            allLayerWeightGradients.insert(0, layerGrandients)
-            allErrorTerms.insert(0, newErrorTerms)
-            lastErrorTerms = newErrorTerms[:]
+            self.weights[layer_idx] = weights - learningRate * grad_w
+            self.biases[layer_idx] -= learningRate * grad_b
 
-        #  update the stuff
-        # first, the biases cuz they easy
-        for layerIndex in range(len(self.biases)):
-            layer = self.biases[layerIndex]
-            for biasIndex in range(len(layer)):
-                bias = layer[biasIndex]
-                bias -= learningRate * allErrorTerms[layerIndex][biasIndex]
-                self.biases[layerIndex][biasIndex] = bias
+        return input_grad.tolist()
 
-        # weights
-        for layerIndex in range(len(self.weights)):
-            layer = self.weights[layerIndex]
-            for toNeuronIndex in range(len(layer)):
-                toNeuronWeights = layer[toNeuronIndex]
-                for weightIndex in range(len(toNeuronWeights)):
-                    weight = toNeuronWeights[weightIndex]
-                    weight -= learningRate * allLayerWeightGradients[layerIndex][toNeuronIndex][weightIndex]
-                    self.weights[layerIndex][toNeuronIndex][weightIndex] = weight
-        
-        input_grad = []
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_rng", None)
+        state.pop("_activations", None)
+        state.pop("_z_values", None)
+        state.pop("_input_vector", None)
+        return state
 
-        for input_idx in range(len(self.neurons[0])):  # a^0 size
-            s = 0.0
-            for neuron_idx in range(len(lastErrorTerms)):
-                s += self.weights[0][neuron_idx][input_idx] * lastErrorTerms[neuron_idx]
-            input_grad.append(s)
+    def __setstate__(self, state):
+        self.inputNeurons = state.get("inputNeurons")
+        self.hiddenLayers = state.get("hiddenLayers", 0)
+        self.neuronsPerHiddenLayer = state.get("neuronsPerHiddenLayer", 0)
+        self.outputNeurons = state.get("outputNeurons", 0)
+        self.dtype = np.float32
+        self._rng = np.random.default_rng()
 
-        return input_grad
+        weights_state = state.get("weights", [])
+        self.weights = [np.asarray(w, dtype=self.dtype) for w in weights_state]
+        biases_state = state.get("biases", [])
+        self.biases = [np.asarray(b, dtype=self.dtype) for b in biases_state]
+
+        if "neurons" in state and state["neurons"]:
+            self.neurons = state["neurons"]
+        else:
+            self.neurons = self.initNeurons(self.inputNeurons, self.hiddenLayers, self.neuronsPerHiddenLayer, self.outputNeurons)
+
+        self.preActivations = state.get("preActivations", [[] for _ in range(self.hiddenLayers + 1)])
+        self.last_loss = state.get("last_loss")
+
+        self._activations = []
+        self._z_values = []
+        self._input_vector = None
 

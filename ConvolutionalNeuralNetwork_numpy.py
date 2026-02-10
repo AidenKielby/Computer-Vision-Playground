@@ -25,14 +25,20 @@ class CNNVectorized:
         self.outputSize = outputSize
         self.kernelSize = kernelSize
         self.poolerSize = poolerSize
-        # match original: numLayers = layers + 1
-        self.numLayers = layers + 1
+        self.numLayers = layers
         self.kernelsPerLayer = kernelsPerLayer
         self.inputChannels = inputChannels
 
         self.inputs = None
         self.layers = []
         self.preActivation = []
+        self.pooled_output = None
+        self.pool_cache = None
+        self.pool_stride = self._determine_pool_stride()
+        if self.pool_stride is not None:
+            self.poolerSize = self.pool_stride
+        else:
+            self.poolerSize = 1
 
         self.kernelLayers = []
         in_ch = self.inputChannels
@@ -43,6 +49,44 @@ class CNNVectorized:
 
         self.distanceFromKernelCenter = kernelSize // 2
         self.grad_clip = 5.0
+
+    def _determine_pool_stride(self):
+        in_h, in_w = self.inputSize
+        out_h, out_w = self.outputSize
+        if out_h is None or out_w is None:
+            return None
+        if out_h == in_h and out_w == in_w:
+            return None
+        if out_h <= 0 or out_w <= 0:
+            raise ValueError("outputSize dimensions must be positive")
+        if in_h % out_h != 0 or in_w % out_w != 0:
+            raise ValueError("outputSize must evenly divide inputSize for pooling")
+        return (in_h // out_h, in_w // out_w)
+
+    def _avg_pool(self, tensor):
+        if self.pool_stride is None:
+            self.pool_cache = None
+            return tensor
+        sh, sw = self.pool_stride
+        B, C, H, W = tensor.shape
+        out_h = H // sh
+        out_w = W // sw
+        reshaped = tensor.reshape(B, C, out_h, sh, out_w, sw)
+        pooled = reshaped.mean(axis=(3, 5))
+        self.pool_cache = (tensor.shape, sh, sw)
+        return pooled
+
+    def _avg_pool_backward(self, grad):
+        if self.pool_stride is None or self.pool_cache is None:
+            return grad
+        orig_shape, sh, sw = self.pool_cache
+        B, C, H, W = orig_shape
+        out_h = H // sh
+        out_w = W // sw
+        grad = grad.reshape(B, C, out_h, out_w, 1, 1)
+        grad = cp.broadcast_to(grad, (B, C, out_h, out_w, sh, sw))
+        grad = grad / (sh * sw)
+        return grad.reshape(orig_shape)
 
     def _init_kernels(self, in_channels):
         # per-kernel, per-channel weights
@@ -102,6 +146,8 @@ class CNNVectorized:
         assert self.inputs is not None, "Call addInputs first"
         self.layers = []
         self.preActivation = []
+        self.pooled_output = None
+        self.pool_cache = None
 
         prev = self.inputs
         for layer_idx in range(self.numLayers):
@@ -119,8 +165,14 @@ class CNNVectorized:
             self.preActivation.append(cp.stack(pre_list, axis=1))
             self.layers.append(prev)
 
+        self.pooled_output = self._avg_pool(prev)
+
     def getOutputs(self):
-        return self.layers[-1]
+        if self.pooled_output is not None:
+            return self.pooled_output
+        if self.layers:
+            return self.layers[-1]
+        raise RuntimeError("No CNN outputs available; call forwardPass first")
 
     def backpropagate(self, correctOutput, learningRate):
         expected = cp.asarray(correctOutput, dtype=cp.float32)
@@ -128,11 +180,13 @@ class CNNVectorized:
             expected = expected[None, None, ...]
         elif expected.ndim == 3:
             expected = expected[None, ...]
-        out = self.layers[-1]
+        out = self.getOutputs()
+        if expected.shape != out.shape:
+            raise ValueError("expected output must have same shape as network output")
+        pooled_grad = cp.clip(out - expected, -10.0, 10.0)
+        front_grad = self._avg_pool_backward(pooled_grad)
         deriv = self._leaky_relu_deriv(self.preActivation[-1])
-        if expected.shape[0] != out.shape[0]:
-            raise ValueError("expected output must have same channel count as network output")
-        front_grad = cp.clip((out - expected) * deriv, -10.0, 10.0)
+        front_grad = cp.clip(front_grad * deriv, -10.0, 10.0)
         for layer_idx in reversed(range(self.numLayers)):
             prev_acts = self.inputs if layer_idx == 0 else self.layers[layer_idx-1]
             kernels = self.kernelLayers[layer_idx]
@@ -163,6 +217,8 @@ class CNNVectorized:
         Represents:
             dLoss / d(CNN_output_activation)
         """
+        if self.pool_stride is not None:
+            gradient = self._avg_pool_backward(gradient)
         frontGradient = gradient * self._leaky_relu_deriv(self.preActivation[-1])
 
         for layerIndex in reversed(range(self.numLayers)):
@@ -233,6 +289,13 @@ class CNNVectorized:
         self.kernelLayers = [_to_backend(k) for k in state["kernelLayers"]]
         self.biases = [_to_backend(b) for b in state["biases"]]
         self.distanceFromKernelCenter = self.kernelSize // 2
+        self.pool_stride = self._determine_pool_stride()
+        if self.pool_stride is not None:
+            self.poolerSize = self.pool_stride
+        else:
+            self.poolerSize = 1
+        self.pool_cache = None
+        self.pooled_output = None
 
 def train_on_symbols_vec(iterations=1000, lr=0.01):
     x_img = cp.array([

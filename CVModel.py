@@ -16,11 +16,11 @@ class CVModel:
         self.inputChannels = inputChannels
         self.kernelSize = kernelSize
         self.poolerSize = 2
-        self.feature_map_size = (15, 15)
+        self.feature_map_size = (25, 25)
         self.cnn = CNNVectorized(inputSize, self.feature_map_size, kernelSize, self.poolerSize, layers, kernelsPerLayer, inputChannels)
         feature_h, feature_w = self.feature_map_size
         self.mlp = NeuralNetwork(kernelsPerLayer * feature_h * feature_w, 10, 32, outputs)
-        self.activation_scale = 1e5
+        self.activation_scale = 1
         self._last_cnn_output_shape: tuple[int, ...] | None = None
         self._last_spatial_shape: tuple[int, ...] | None = None
         self._last_flat_batch: np.ndarray | None = None

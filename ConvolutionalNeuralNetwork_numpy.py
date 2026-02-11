@@ -45,7 +45,7 @@ class CNNVectorized:
         for _ in range(self.numLayers):
             self.kernelLayers.append(self._init_kernels(in_ch))
             in_ch = self.kernelsPerLayer
-        self.biases = [cp.zeros((self.kernelsPerLayer,), dtype=cp.float32) for _ in range(self.numLayers)]
+        self.biases = [cp.full((self.kernelsPerLayer,), 0.01, dtype=cp.float32) for _ in range(self.numLayers)]
 
         self.distanceFromKernelCenter = kernelSize // 2
         self.grad_clip = 5.0

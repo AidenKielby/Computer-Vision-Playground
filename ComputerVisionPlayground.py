@@ -859,62 +859,100 @@ class VideoTrainingWorker(QThread):
             self.finished.emit()
             return
 
-        frame_counts = []
+        sources = []
+        min_frames = None
         for path in self.video_paths:
             cap = cv2.VideoCapture(path)
-            if cap.isOpened():
-                frame_counts.append(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
-            else:
-                frame_counts.append(0)
-            cap.release()
+            if not cap.isOpened():
+                cap.release()
+                continue
+            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frames <= 0:
+                cap.release()
+                continue
+            sources.append({"path": path, "cap": cap})
+            min_frames = frames if min_frames is None else min(min_frames, frames)
 
-        total_frames_per_epoch = sum(frame_counts)
-        if total_frames_per_epoch <= 0:
+        if not sources or min_frames is None or min_frames <= 0:
+            for source in sources:
+                cap = source.get("cap")
+                if cap is not None:
+                    cap.release()
             self.progress.emit(100)
             self.eta.emit(0.0)
             self.finished.emit()
             return
 
-        total_work = total_frames_per_epoch * self.epochs
+        total_work = len(sources) * min_frames * self.epochs
         processed_global = 0
         start_time = time.time()
         batch_inputs = []
         batch_expected = []
+        dataset_exhausted = False
 
-        for _ in range(self.epochs):
-            if not self._running:
-                break
-
-            for path in self.video_paths:
-                if not self._running:
+        try:
+            for epoch_idx in range(self.epochs):
+                if not self._running or dataset_exhausted:
                     break
 
-                cap = cv2.VideoCapture(path)
-                while cap.isOpened():
-                    if not self._running:
+                if epoch_idx > 0:
+                    for source in sources:
+                        cap = source.get("cap")
+                        if cap is None:
+                            dataset_exhausted = True
+                            break
+                        if not cap.set(cv2.CAP_PROP_POS_FRAMES, 0):
+                            cap.release()
+                            new_cap = cv2.VideoCapture(source["path"])
+                            if not new_cap.isOpened():
+                                dataset_exhausted = True
+                                break
+                            source["cap"] = new_cap
+                    if dataset_exhausted:
                         break
 
-                    ret, frame = cap.read()
-                    if not ret:
+                for frame_idx in range(min_frames):
+                    if not self._running or dataset_exhausted:
                         break
 
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    tensor = self.frame_to_tensor(frame_rgb, self.cvm.inputSize[0])
-                    expected = self.get_expected_output(path)
+                    for source in sources:
+                        if not self._running:
+                            break
 
-                    batch_inputs.append(tensor)
-                    batch_expected.append(expected)
+                        cap = source.get("cap")
+                        if cap is None:
+                            dataset_exhausted = True
+                            break
 
-                    if len(batch_inputs) >= self.batch_size:
-                        processed_global = self._train_batch(
-                            batch_inputs,
-                            batch_expected,
-                            processed_global,
-                            total_work,
-                            start_time
-                        )
+                        ret, frame = cap.read()
+                        if not ret:
+                            dataset_exhausted = True
+                            break
 
-                cap.release()
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        tensor = self.frame_to_tensor(frame_rgb, self.cvm.inputSize[0])
+                        expected = self.get_expected_output(source["path"])
+
+                        batch_inputs.append(tensor)
+                        batch_expected.append(expected)
+
+                        if len(batch_inputs) >= self.batch_size:
+                            processed_global = self._train_batch(
+                                batch_inputs,
+                                batch_expected,
+                                processed_global,
+                                total_work,
+                                start_time
+                            )
+                    if not self._running or dataset_exhausted:
+                        break
+                if not self._running or dataset_exhausted:
+                    break
+        finally:
+            for source in sources:
+                cap = source.get("cap")
+                if cap is not None:
+                    cap.release()
 
         if self._running and batch_inputs:
             processed_global = self._train_batch(

@@ -65,8 +65,8 @@ class NeuralNetwork:
     def initBiases(self, hiddenLayers: int, neuronsPerHiddenLayer: int, outputNeurons: int):
         biases: list[np.ndarray] = []
         for _ in range(hiddenLayers):
-            biases.append(np.zeros(neuronsPerHiddenLayer, dtype=self.dtype))
-        biases.append(np.zeros(outputNeurons, dtype=self.dtype))
+            biases.append(np.full((self.neuronsPerHiddenLayer,), 0.01, dtype=np.float32))
+        biases.append(np.full((self.outputNeurons,), 0.01, dtype=np.float32))
         return biases
 
     def forwardPass(self):
@@ -111,6 +111,10 @@ class NeuralNetwork:
         tgt = np.asarray(target, dtype=self.dtype)
         return float(-np.sum(tgt * np.log(out)))
 
+    def _softmax_cross_entropy_delta(self, output, target):
+        """Gradient of softmax + categorical cross-entropy combo."""
+        return output - target
+
     def backpropagate(self, correctOutput: list[float], learningRate: float):
         if not self._activations or not self._z_values:
             raise RuntimeError("forwardPass must be called before backpropagate")
@@ -125,7 +129,7 @@ class NeuralNetwork:
             delta = output - target
         else:
             self.last_loss = self._categorical_cross_entropy(output, target)
-            delta = output - target
+            delta = self._softmax_cross_entropy_delta(output, target)
 
         input_grad = np.zeros(self.inputNeurons, dtype=self.dtype)
 
@@ -139,7 +143,9 @@ class NeuralNetwork:
             if layer_idx == 0:
                 input_grad = weights.T @ delta
             else:
-                delta = (weights.T @ delta) * self._leaky_relu_derivative(self._z_values[layer_idx - 1])
+                delta = (weights.T @ delta)
+                if layer_idx < len(self.weights):
+                    delta = delta * self._leaky_relu_derivative(self._z_values[layer_idx - 1])
 
             self.weights[layer_idx] = weights - learningRate * grad_w
             self.biases[layer_idx] -= learningRate * grad_b
